@@ -1,0 +1,10 @@
+{
+  "name": "pi-suffix-command",
+  "version": "0.1.0",
+  "description": "Type /cmd at the end of a draft: Pi dispatches the command (through a user-defined mapping) and keeps the draft in the editor.",
+  "license": "MIT",
+  "type": "module",
+  "pi": {
+    "extensions": ["./suffix-command.ts"]
+  }
+}
