@@ -91,17 +91,26 @@ args："--history retry"
 ```json
 {
   "rules": [
+    { "trigger": "/claro", "template": "command-mid" },
     { "trigger": "/btw", "template": "command-first" }
   ]
 }
 ```
 
-| 模板 | 命令位置 | 命令前 | 命令后 |
-|---|---|---|---|
-| `command-first`（默认） | 前 / 句中 | → `input` 回草稿 | → `args`（只到行尾） |
-| `command-mid` | 整段末尾 | → `args`（可跨行） | 不允许 |
+| 模板 | 命令位置 | 命令前 | 命令后 | 典型用例 |
+|---|---|---|---|---|
+| `command-first`（默认） | 前 / 句中 | → `input` 回草稿 | → `args`（只到行尾） | `/btw` |
+| `command-mid` | 整段末尾 | → `args`（可跨行） | 不允许 | `/claro` |
 
-`command-first` 适合“草稿 + 命令 + 问题”的写法；`command-mid` 适合把一整段内容作为参数提交、命令只作结尾标记的场景。两者边界一致：`src/命令`、`命令x` 不命中。
+```text
+重构 parseRetry /btw 为什么重试没生效
+→ 派发 /btw 为什么重试没生效，草稿：重构 parseRetry
+
+一大段对话 /claro
+→ 派发 /claro 一大段对话，草稿：空
+```
+
+边界跟默认规则一致：`src/claro`、`/clarox`、`什么/claro` 不命中；`command-mid` 要求命令落在整段末尾，`asdasd /claro 补充`、`asdasd /claro。` 都不命中（需要容忍标点或后文时改用 `match`）。
 
 ### 使用 match 自定义语法
 

@@ -1,5 +1,6 @@
 {
   "rules": [
-    { "trigger": "/btw", "template": "command-first" }
+    { "trigger": "/btw", "template": "command-first" },
+    { "trigger": "/claro", "template": "command-mid" }
   ]
 }

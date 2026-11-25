@@ -10,7 +10,7 @@
  *       { "trigger": "/btw" },                                          // command-first
  *       { "trigger": "/btw", "template": "command-first" },              // 同上，显式写
  *       { "trigger": "/q", "command": "/btw" },                         // 别名
- *       { "trigger": "/note", "template": "command-mid" },            // 命令在句尾
+ *       { "trigger": "/claro", "template": "command-mid" },            // 命令在句尾
  *       { "match": "(?<input>[\\s\\S]*?)\\s*##review\\s+(?<args>[^\\n]*)$",
  *         "command": "/subagent", "argsPrefix": "--agent reviewer" }
  *     ]
@@ -29,7 +29,7 @@
  *   command-first（/btw 类）
  *     trigger 之前的内容 = input，回到输入框
  *     trigger 之后到行尾 = args，拼给命令
- *   command-mid（/note 类）
+ *   command-mid（/claro 类）
  *     trigger 之前的内容 = args，拼给命令
  *     trigger 必须位于整段末尾，草稿清空
  *
@@ -58,7 +58,7 @@ const PROJECT_CONFIG_DIR = ".pi";
 const STATUS_KEY = "suffix-command";
 const COMMAND_NAME = "suffix";
 
-/** 切分模板：命令在前（/btw）或命令在尾（/note）。 */
+/** 切分模板：命令在前（/btw）或命令在尾（/claro）。 */
 type Template = "command-first" | "command-mid";
 
 const TEMPLATES: readonly Template[] = ["command-first", "command-mid"];
@@ -113,7 +113,7 @@ function escapeRegExp(text: string): string {
  *
  *   command-first  key /btw 这类：
  *     前文 -> input（草稿），后文（同一行）-> args
- *   command-mid   /note 这类：
+ *   command-mid   /claro 这类：
  *     前文（可跨行）-> args，触发词必须落在整段末尾，input 为空
  */
 function triggerPattern(trigger: string, template: Template = "command-first"): string {
