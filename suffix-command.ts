@@ -7,8 +7,10 @@
  *
  *   {
  *     "rules": [
- *       { "trigger": "/btw" },                            // /btw -> /btw
- *       { "trigger": "/q", "command": "/btw" },           // 别名
+ *       { "trigger": "/btw" },                                          // command-first
+ *       { "trigger": "/btw", "template": "command-first" },              // 同上，显式写
+ *       { "trigger": "/q", "command": "/btw" },                         // 别名
+ *       { "trigger": "/note", "template": "command-mid" },            // 命令在句尾
  *       { "match": "(?<input>[\\s\\S]*?)\\s*##review\\s+(?<args>[^\\n]*)$",
  *         "command": "/subagent", "argsPrefix": "--agent reviewer" }
  *     ]
@@ -16,13 +18,20 @@
  *
  * 一条规则：
  *   trigger    字面量触发词，带斜杠（`/btw`）或裸词（`btw`）都行
+ *   template   切分模板，仅在 trigger 规则下生效：
+ *                command-first（默认）命令在前：之前 = input，之后到行尾 = args
+ *                command-mid        命令在尾：之前全部 = args，触发词必须在末尾
  *   match      自定义正则，作用于整段输入，可用命名组 input / args
  *   command    命中后派发的命令；省略时等于 trigger 本身（/btw -> /btw）
  *   argsPrefix 可选，拼在参数前面
  *
  * trigger 规则的语义：
- *   trigger 之前的内容 = input，回到输入框
- *   trigger 之后到行尾 = args，拼给命令
+ *   command-first（/btw 类）
+ *     trigger 之前的内容 = input，回到输入框
+ *     trigger 之后到行尾 = args，拼给命令
+ *   command-mid（/note 类）
+ *     trigger 之前的内容 = args，拼给命令
+ *     trigger 必须位于整段末尾，草稿清空
  *
  * 解析结果就是三个槽位：
  *   input  草稿 —— 回车后回填输入框
@@ -49,10 +58,17 @@ const PROJECT_CONFIG_DIR = ".pi";
 const STATUS_KEY = "suffix-command";
 const COMMAND_NAME = "suffix";
 
+/** 切分模板：命令在前（/btw）或命令在尾（/note）。 */
+type Template = "command-first" | "command-mid";
+
+const TEMPLATES: readonly Template[] = ["command-first", "command-mid"];
+
 /** 一条转化规则。 */
 interface Rule {
   /** 字面量触发词，例如 `/btw` 或 `btw`。 */
   trigger?: string;
+  /** 切分模板；省略时为 `command-first`。仅对 trigger 规则生效。 */
+  template?: Template;
   /** 自定义正则（作用于整段输入），可用命名组 `input` / `args`。 */
   match?: string;
   /** 命中后派发的命令名（不含斜杠）。 */
@@ -93,20 +109,23 @@ function escapeRegExp(text: string): string {
 }
 
 /**
- * 字面量触发词编译成正则：
- *   前边界：行首 / 空白 / 非 ASCII（中文、全角标点），所以 `src/btw` 不算
- *   后边界：空白或行尾，所以 `btwx` 不算
- *   参数：触发词之后到行尾
+ * 字面量触发词编译成正则，前边界：行首 / 空白 / 非 ASCII，后边界：空白或行尾。
+ *
+ *   command-first  key /btw 这类：
+ *     前文 -> input（草稿），后文（同一行）-> args
+ *   command-mid   /note 这类：
+ *     前文（可跨行）-> args，触发词必须落在整段末尾，input 为空
  */
-function triggerPattern(trigger: string): string {
-  return (
-    `(?:^|(?<=\\s)|(?<=[^\\x00-\\x7F]))${escapeRegExp(trigger)}` +
-    `(?:[ \\t]+(?<args>[^\\r\\n]*?))?[ \\t]*(?=\\r?\\n|$)`
-  );
+function triggerPattern(trigger: string, template: Template = "command-first"): string {
+  const head = `(?:^|(?<=\\s)|(?<=[^\\x00-\\x7F]))${escapeRegExp(trigger)}`;
+  if (template === "command-mid") {
+    return `(?<args>[\\s\\S]*?)${head}[ \\t]*$`;
+  }
+  return `${head}(?:[ \\t]+(?<args>[^\\r\\n]*?))?[ \\t]*(?=\\r?\\n|$)`;
 }
 
 function compileRule(rule: Rule): CompiledRule | undefined {
-  const source = rule.match ? rule.match : rule.trigger ? triggerPattern(rule.trigger) : "";
+  const source = rule.match ? rule.match : rule.trigger ? triggerPattern(rule.trigger, rule.template) : "";
   if (!source) return undefined;
   try {
     return { rule, regex: new RegExp(source) };
@@ -152,11 +171,22 @@ function parseWith(compiled: CompiledRule, text: string): Parsed | undefined {
 
 function normaliseRule(value: unknown): Rule | undefined {
   if (!value || typeof value !== "object") return undefined;
-  const raw = value as { trigger?: unknown; match?: unknown; command?: unknown; argsPrefix?: unknown };
+  const raw = value as {
+    trigger?: unknown;
+    template?: unknown;
+    match?: unknown;
+    command?: unknown;
+    argsPrefix?: unknown;
+  };
 
   const trigger = typeof raw.trigger === "string" && raw.trigger.trim() ? raw.trigger.trim() : undefined;
   const match = typeof raw.match === "string" && raw.match.trim() ? raw.match.trim() : undefined;
   if (!trigger && !match) return undefined;
+
+  // template 只认白名单，写错视为无效规则（会在 /suffix 里提示）。
+  const rawTemplate = typeof raw.template === "string" ? raw.template.trim() : "";
+  if (rawTemplate && !(TEMPLATES as readonly string[]).includes(rawTemplate)) return undefined;
+  const template = rawTemplate ? (rawTemplate as Template) : undefined;
 
   // command 省略时等于 trigger 本身（/btw -> /btw），派发时一律不带斜杠。
   const declared = typeof raw.command === "string" ? raw.command.trim() : "";
@@ -165,6 +195,7 @@ function normaliseRule(value: unknown): Rule | undefined {
 
   const rule: Rule = { command };
   if (trigger) rule.trigger = trigger;
+  if (template) rule.template = template;
   if (match) rule.match = match;
   if (typeof raw.argsPrefix === "string" && raw.argsPrefix.trim()) rule.argsPrefix = raw.argsPrefix.trim();
   return rule;
@@ -200,7 +231,9 @@ function resolveCommandName(name: string, registered: ReadonlySet<string>): stri
 }
 
 function describeRule(rule: Rule): string {
-  const matcher = rule.trigger ? `trigger "${rule.trigger}"` : `match ${rule.match}`;
+  const matcher = rule.trigger
+    ? `trigger "${rule.trigger}"${rule.template === "command-mid" ? " [command-mid]" : ""}`
+    : `match ${rule.match}`;
   const sameAsTrigger = rule.trigger !== undefined && rule.trigger.replace(/^\/+/, "") === rule.command;
   const target = sameAsTrigger ? "" : ` -> /${rule.command}`;
   const prefix = rule.argsPrefix ? ` +args "${rule.argsPrefix}"` : "";

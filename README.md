@@ -77,11 +77,31 @@ args："--history retry"
 | 字段 | 必需 | 说明 |
 |---|---|---|
 | `trigger` | 与 `match` 二选一 | 字面量触发词，如 `/btw`；不加斜杠的裸词（`btw`）同样有效 |
+| `template` | 否 | 切分模板：`command-first`（默认）或 `command-mid`，仅对 `trigger` 规则生效 |
 | `match` | 与 `trigger` 二选一 | 作用于整段输入的正则，可用命名组 `input`、`args` |
 | `command` | 否 | 命中后派发的命令；省略时等于 `trigger` 本身 |
 | `argsPrefix` | 否 | 附加在参数之前 |
 
 上例中 `/q 为什么` 派发 `/btw 为什么`。
+
+### 两个内置模板
+
+不用写正则，用 `template` 选切分方式：
+
+```json
+{
+  "rules": [
+    { "trigger": "/btw", "template": "command-first" }
+  ]
+}
+```
+
+| 模板 | 命令位置 | 命令前 | 命令后 |
+|---|---|---|---|
+| `command-first`（默认） | 前 / 句中 | → `input` 回草稿 | → `args`（只到行尾） |
+| `command-mid` | 整段末尾 | → `args`（可跨行） | 不允许 |
+
+`command-first` 适合“草稿 + 命令 + 问题”的写法；`command-mid` 适合把一整段内容作为参数提交、命令只作结尾标记的场景。两者边界一致：`src/命令`、`命令x` 不命中。
 
 ### 使用 match 自定义语法
 
@@ -109,6 +129,8 @@ args："--history retry"
 | `<project>/.pi/suffix-command.json` | 当前项目（需项目信任），覆盖全局配置 |
 
 修改后立即生效。仓库中的 `suffix-command.example.json` 为最小示例。
+
+注意：一旦存在配置文件，内置的“每个已注册命令一条 `/名称`”规则就不再生效（`/suffix` 只列出配置里的规则）。要保留某个命令的句中触发，就显式写一条 `{ "trigger": "/命令" }`。
 
 ## 命令
 
