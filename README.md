@@ -46,21 +46,6 @@ pi install git:github.com/Crack-Hu/pi-suffix-command
 | `cmd` | 命令 | 经规则映射后决定实际派发的命令 |
 | `args` | 参数 | 附加在命令之后 |
 
-查看某段输入的解析结果：
-
-```bash
-/suffix --test 草稿 /btw --history retry
-```
-
-```text
-输入："草稿 /btw --history retry"
-input（草稿）："草稿 "
-cmd：/btw
-args："--history retry"
-派发：/btw --history retry
-回车后输入框：上面的 input
-```
-
 ## 配置
 
 配置文件用于定义别名或自定义匹配方式，可选。规则按顺序匹配，第一条命中者生效。
@@ -139,16 +124,7 @@ args："--history retry"
 
 修改后立即生效。仓库中的 `suffix-command.example.json` 为最小示例。
 
-注意：一旦存在配置文件，内置的“每个已注册命令一条 `/名称`”规则就不再生效（`/suffix` 只列出配置里的规则）。要保留某个命令的句中触发，就显式写一条 `{ "trigger": "/命令" }`。
-
-## 命令
-
-| 命令 | 作用 |
-|---|---|
-| `/suffix` | 显示当前规则与配置路径 |
-| `/suffix --test <示例输入>` | 显示解析结果与实际派发的命令 |
-| `/suffix --init` | 生成配置文件（已存在时不覆盖） |
-| `/suffix --edit` | 在 `$EDITOR` 中编辑配置，保存后立即生效 |
+注意：一旦存在配置文件，内置的“每个已注册命令一条 `/名称`”规则就不再生效，配置里的规则就是全部规则。要保留某个命令的句中触发，就显式写一条 `{ "trigger": "/命令" }`。
 
 ## 限制
 

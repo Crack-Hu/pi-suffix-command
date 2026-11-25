@@ -39,24 +39,18 @@
  *   args   参数 —— 拼在命令后面
  *
  * 不写配置文件时，任何已注册的 `/命令` 都能直接用（内置规则：每个已注册命令一条）。
- *
- * 命令：
- *   /suffix                  看当前规则和配置路径
- *   /suffix --test <示例输入>  看这段输入会被解析成什么、派发什么
- *   /suffix --init           生成配置文件（已存在则不覆盖）
- *   /suffix --edit           在外部编辑器里编辑配置，保存后立即生效
+ * 本插件不注册任何命令，配置直接编辑 JSON 即可。
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 const CONFIG_FILE = "suffix-command.json";
 const PROJECT_CONFIG_DIR = ".pi";
 const STATUS_KEY = "suffix-command";
-const COMMAND_NAME = "suffix";
 
 /** 切分模板：命令在前（/btw）或命令在尾（/claro）。 */
 type Template = "command-first" | "command-mid";
@@ -256,19 +250,17 @@ export default function suffixCommand(pi: ExtensionAPI) {
 
   /** 没有配置文件时的内置规则：每个已注册命令一条 `/命令`。 */
   function builtinRules(): Rule[] {
-    const names = [...dispatchableCommands()].filter((name) => name !== COMMAND_NAME).sort();
+    const names = [...dispatchableCommands()].sort();
     return names.length > 0 ? names.map((name) => ({ trigger: `/${name}`, command: name })) : [FALLBACK_RULE];
   }
 
   /** 全局配置覆盖内置规则，项目配置覆盖全局配置。 */
-  function loadRules(ctx: ExtensionContext): { rules: Rule[]; sources: string[] } {
+  function loadRules(ctx: ExtensionContext): Rule[] {
     let rules: Rule[] | undefined;
-    const sources: string[] = [];
 
     const globalPath = globalConfigPath();
     const globalConfig = readConfig(globalPath);
     if (globalConfig) {
-      sources.push(globalPath);
       if (globalConfig.error) reportOnce(ctx, globalPath, `${globalPath}: ${globalConfig.error}`);
       if (globalConfig.rules && globalConfig.rules.length > 0) rules = globalConfig.rules;
     }
@@ -277,31 +269,29 @@ export default function suffixCommand(pi: ExtensionAPI) {
       const projectPath = join(ctx.cwd, PROJECT_CONFIG_DIR, CONFIG_FILE);
       const projectConfig = readConfig(projectPath);
       if (projectConfig) {
-        sources.push(projectPath);
         if (projectConfig.error) reportOnce(ctx, projectPath, `${projectPath}: ${projectConfig.error}`);
         if (projectConfig.rules && projectConfig.rules.length > 0) rules = projectConfig.rules;
       }
     }
 
-    return { rules: rules ?? builtinRules(), sources };
+    return rules ?? builtinRules();
   }
 
-  function compiledRules(ctx: ExtensionContext): { rules: CompiledRule[]; sources: string[]; broken: string[] } {
-    const { rules, sources } = loadRules(ctx);
+  function compiledRules(ctx: ExtensionContext): CompiledRule[] {
     const compiled: CompiledRule[] = [];
     const broken: string[] = [];
-    for (const rule of rules) {
+    for (const rule of loadRules(ctx)) {
       const result = compileRule(rule);
       if (result) compiled.push(result);
       else broken.push(describeRule(rule));
     }
     for (const rule of broken) reportOnce(ctx, `rule:${rule}`, `规则无效（trigger/match 缺失或正则写错）：${rule}`);
-    return { rules: compiled, sources, broken };
+    return compiled;
   }
 
   /** 把输入解析成三个槽位，并算好最终派发的命令。 */
   function evaluate(text: string, ctx: ExtensionContext): Evaluation | undefined {
-    const { rules } = compiledRules(ctx);
+    const rules = compiledRules(ctx);
     const dispatchable = dispatchableCommands();
 
     for (const compiled of rules) {
@@ -327,90 +317,6 @@ export default function suffixCommand(pi: ExtensionAPI) {
     }, 0);
   }
 
-  function saveConfig(ctx: ExtensionContext, text: string): boolean {
-    try {
-      JSON.parse(text);
-    } catch (error) {
-      ctx.ui.notify(`JSON 无效：${error instanceof Error ? error.message : String(error)}`, "error");
-      return false;
-    }
-    const path = globalConfigPath();
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, text.endsWith("\n") ? text : `${text}\n`, "utf8");
-    ctx.ui.notify(`已保存 ${path}（立即生效）`, "info");
-    return true;
-  }
-
-  function scaffold(): string {
-    return `${JSON.stringify({ rules: [{ trigger: "/btw" }] }, null, 2)}\n`;
-  }
-
-  pi.registerCommand(COMMAND_NAME, {
-    description: "Show rules, parse a sample (--test), or manage config (--init / --edit)",
-    handler: async (args, ctx) => {
-      const flag = args.trim();
-      const path = globalConfigPath();
-
-      if (flag === "--init") {
-        if (existsSync(path)) {
-          ctx.ui.notify(`${path} 已存在，用 /${COMMAND_NAME} --edit 修改`, "info");
-          return;
-        }
-        mkdirSync(dirname(path), { recursive: true });
-        writeFileSync(path, scaffold(), "utf8");
-        ctx.ui.notify(`已创建 ${path}`, "info");
-        return;
-      }
-
-      if (flag === "--edit") {
-        if (ctx.hasUI === false) {
-          ctx.ui.notify(`请在 TUI 里编辑，或直接改 ${path}`, "warning");
-          return;
-        }
-        const current = existsSync(path) ? readFileSync(path, "utf8") : scaffold();
-        const edited = await ctx.ui.editor(CONFIG_FILE, current);
-        if (edited === undefined || edited.trim() === "") return;
-        saveConfig(ctx, edited);
-        return;
-      }
-
-      if (flag.startsWith("--test")) {
-        const sample = args.trim().slice("--test".length).trim();
-        if (!sample) {
-          ctx.ui.notify(`用法：/${COMMAND_NAME} --test 你的示例输入`, "info");
-          return;
-        }
-        const result = evaluate(sample, ctx);
-        if (!result) {
-          ctx.ui.notify(`没有规则命中：${JSON.stringify(sample)}`, "info");
-          return;
-        }
-        ctx.ui.notify(
-          [
-            `输入：${JSON.stringify(sample)}`,
-            `input（草稿）：${JSON.stringify(result.parsed.input)}`,
-            `cmd：/${result.parsed.cmd}`,
-            `args：${JSON.stringify(result.parsed.args ?? "")}`,
-            `派发：${result.command}`,
-            result.error ? `⚠️ ${result.error}` : "回车后输入框：上面的 input",
-          ].join("\n"),
-          result.error ? "warning" : "info",
-        );
-        return;
-      }
-
-      const { rules, sources } = loadRules(ctx);
-      const where = sources.length > 0 ? sources.join("\n") : `${path}（还没创建，用内置规则）`;
-      const listing = rules.map((rule) => `· ${describeRule(rule)}`).join("\n");
-      ctx.ui.notify(
-        `配置：${where}\n\n${listing}\n\n` +
-          `槽位：input=草稿、cmd=命令、args=参数。\n` +
-          `试解析：/${COMMAND_NAME} --test 某段示例输入`,
-        "info",
-      );
-    },
-  });
-
   pi.on("input", (event, ctx) => {
     // 不拦截扩展自己注入的消息，避免循环。
     if (event.source === "extension") return { action: "continue" };
@@ -431,7 +337,7 @@ export default function suffixCommand(pi: ExtensionAPI) {
     }
 
     dispatch(result.command);
-    ctx.ui.setStatus(STATUS_KEY, `${result.command.split(/\s+/)[0]} dispatched, draft kept`);
+    ctx.ui.setStatus(STATUS_KEY, `${result.command} dispatched, draft kept`);
     setTimeout(() => ctx.ui.setStatus(STATUS_KEY, undefined), 2500);
 
     return { action: "handled" };
